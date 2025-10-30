@@ -1,0 +1,80 @@
+import requests
+import json
+import pandas as pd
+
+BASE_URL = "https://api.doge.gov/savings/grants"
+HEADERS = {"accept": "application/json"}
+
+def get_page_json(page_number, per_page=100):
+    params = {
+        "sort_by": "date",
+        "sort_order": "desc",
+        "page": page_number,
+        "per_page": per_page,
+    }
+    resp = requests.get(BASE_URL, headers=HEADERS, params=params)
+    resp.raise_for_status()
+    return resp.json()
+
+def get_total_pages(per_page=100):
+    data = get_page_json(1, per_page)
+    if "result" in data and "pagination" in data["result"]:
+        return data["result"]["pagination"]["total_pages"]
+    elif "result" in data and "meta" in data["result"]:
+        return data["result"]["meta"]["total_pages"]
+    elif "meta" in data and "total_pages" in data["meta"]:
+        return data["meta"]["total_pages"]
+    else:
+        print("No pagination info found, defaulting to 1 page.")
+        return 1
+
+def fetch_all_grants(per_page=100):
+    total_pages = get_total_pages(per_page)
+    all_grants = []
+
+    for page in range(1, total_pages + 1):
+        data = get_page_json(page, per_page)
+        if "result" in data and "grants" in data["result"]:
+            grants = data["result"]["grants"]
+        elif "grants" in data:
+            grants = data["grants"]
+        else:
+            print(f"No grants found on page {page}")
+            grants = []
+        if not grants:
+            break
+        all_grants.extend(grants)
+
+    df = pd.DataFrame(all_grants)
+    return df
+
+def make_monthly_summary(df):
+    date_col = "date"
+    savings_col = "savings"
+
+    if date_col not in df.columns:
+        print(f"Couldn't find '{date_col}' column. Columns are:", df.columns)
+        return df
+    if savings_col not in df.columns:
+        print(f"Couldn't find '{savings_col}' column. Columns are:", df.columns)
+        return df
+
+    df[date_col] = pd.to_datetime(df[date_col])
+    df["year"] = df[date_col].dt.year
+    df["month"] = df[date_col].dt.month
+
+    monthly = (
+        df.groupby(["year", "month"], as_index=False)[savings_col]
+        .sum()
+        .sort_values(["year", "month"])
+    )
+    return monthly
+
+if __name__ == "__main__":
+    all_grants_df = fetch_all_grants()
+    print("All grants shape:", all_grants_df.shape)
+    print(all_grants_df.head())
+
+    monthly_summary_df = make_monthly_summary(all_grants_df)
+    print("\nMonthly savings summary:")
+    print(monthly_summary_df)
